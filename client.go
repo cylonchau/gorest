@@ -27,41 +27,23 @@ var (
 	extraLongThrottleLatency = 1 * time.Second
 )
 
-var _ RequestInterface = &RESTClient{}
-
 var noBackoff = &rest.NoBackoff{}
 
 type RESTClient struct {
-	Base             *url.URL
 	Client           *http.Client
 	createBackoffMgr func() rest.BackoffManager
 	rateLimiter      flowcontrol.RateLimiter
 }
 
-func NewRESTClient(baseURL string) *RESTClient {
-	var base *url.URL
-	parsedUrl, err := url.Parse(baseURL)
-	if err != nil {
-		base = new(url.URL)
-	} else {
-		base = parsedUrl
-	}
-
-	if !strings.HasSuffix(base.Path, "/") {
-		base.Path += "/"
-	}
-	base.RawQuery = ""
-	base.Fragment = ""
-
+func NewDefaultRESTClient() *RESTClient {
 	return &RESTClient{
-		Base:             base,
 		createBackoffMgr: readExpBackoffConfig,
 		rateLimiter:      flowcontrol.NewTokenBucketRateLimiter(100.00, 10),
 		Client:           &http.Client{},
 	}
 }
 
-func NewRESTClientWithProxy(baseURL, proxyUrl string) *RESTClient {
+func FastNewRESTClientWithProxy(baseURL, proxyUrl string) *RESTClient {
 	var (
 		base   *url.URL
 		client *http.Client
@@ -95,31 +77,10 @@ func NewRESTClientWithProxy(baseURL, proxyUrl string) *RESTClient {
 	}
 
 	return &RESTClient{
-		Base:             base,
 		createBackoffMgr: readExpBackoffConfig,
 		rateLimiter:      flowcontrol.NewTokenBucketRateLimiter(100.00, 10),
 		Client:           client,
 	}
-}
-
-func (c *RESTClient) Get() *Request {
-	return c.Verb("GET")
-}
-
-func (c *RESTClient) Post() *Request {
-	return c.Verb("POST")
-}
-
-func (c *RESTClient) Delete() *Request {
-	return c.Verb("DELETE")
-}
-
-func (c *RESTClient) Put() *Request {
-	return c.Verb("PUT")
-}
-
-func (c *RESTClient) Verb(verb string) *Request {
-	return NewDefaultRequest(c).Verb(verb)
 }
 
 func get(url string) (body []byte) {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/net"
@@ -25,6 +26,8 @@ const (
 	envBackoffBase     = "KUBE_CLIENT_BACKOFF_BASE"
 	envBackoffDuration = "KUBE_CLIENT_BACKOFF_DURATION"
 )
+
+var _ RequestInterface = &Request{}
 
 type Request struct {
 	c *RESTClient
@@ -53,12 +56,43 @@ func (r *Request) Verb(verb string) *Request {
 	return r
 }
 
-func NewDefaultRequest(c *RESTClient) *Request {
+func (r *Request) Get() *Request {
+	return r.Verb("GET")
+}
+
+func (r *Request) Post() *Request {
+	return r.Verb("POST")
+}
+
+func (r *Request) Delete() *Request {
+	return r.Verb("DELETE")
+}
+
+func (r *Request) Put() *Request {
+	return r.Verb("PUT")
+}
+
+func stringToURL(baseURL string) (base *url.URL) {
+	parsedUrl, err := url.Parse(baseURL)
+	if err != nil {
+		base = new(url.URL)
+	} else {
+		base = parsedUrl
+	}
+
+	if !strings.HasSuffix(base.Path, "/") {
+		base.Path += "/"
+	}
+	base.RawQuery = ""
+	base.Fragment = ""
+	return
+}
+
+func NewRequestWithClient(c *RESTClient) *Request {
 	var timeout time.Duration
 	if c.Client != nil {
 		timeout = c.Client.Timeout
 	}
-
 	var backoff rest.BackoffManager
 	if c.createBackoffMgr != nil {
 		backoff = c.createBackoffMgr()
@@ -67,7 +101,6 @@ func NewDefaultRequest(c *RESTClient) *Request {
 		backoff = noBackoff
 	}
 	return &Request{
-		url:        c.Base,
 		c:          c,
 		backoff:    backoff,
 		header:     make(map[string]string),
@@ -77,11 +110,34 @@ func NewDefaultRequest(c *RESTClient) *Request {
 	}
 }
 
-// NewRequestWithClient creates a Request with an embedded RESTClient for use in test scenarios.
-func NewRequestWithClient(client *http.Client) *Request {
-	return NewDefaultRequest(&RESTClient{
-		Client: client,
-	})
+func FastRequest(baseURL string) *Request {
+	var c *RESTClient
+
+	var backoff rest.BackoffManager
+	if c.createBackoffMgr != nil {
+		backoff = c.createBackoffMgr()
+	}
+	if backoff == nil {
+		backoff = noBackoff
+	}
+
+	c = NewDefaultRESTClient()
+	return &Request{
+		url:        stringToURL(baseURL),
+		c:          c,
+		backoff:    backoff,
+		header:     make(map[string]string),
+		body:       nil,
+		maxRetries: 10,
+		timeout:    c.Client.Timeout,
+	}
+}
+
+func (r *Request) URL(baseURL string) *Request {
+	if r.url != nil {
+		r.url = stringToURL(baseURL)
+	}
+	return r
 }
 
 func (r *Request) tryThrottle(ctx context.Context) error {
