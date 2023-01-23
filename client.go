@@ -1,9 +1,6 @@
 package rest
 
 import (
-	"bytes"
-	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,7 +9,6 @@ import (
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/klog/v2"
 )
 
 var dataplaneapi = "http://10.0.0.3:5555"
@@ -81,57 +77,6 @@ func FastNewRESTClientWithProxy(baseURL, proxyUrl string) *RESTClient {
 		rateLimiter:      flowcontrol.NewTokenBucketRateLimiter(100.00, 10),
 		Client:           client,
 	}
-}
-
-func get(url string) (body []byte) {
-	client := &http.Client{}
-	url = fmt.Sprintf("%s/%s", dataplaneapi, url)
-	req, err := http.NewRequest("GET", url, nil)
-	//req.Header.Add("Authorization", fmt.Sprintf("Basic %s", basicAuth("admin", "1fc917c7ad66487470e466c0ad40ddd45b9f7730a4b43e1b2542627f0596bbdc")))
-	req.Header.Add("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		klog.V(3).Infof("Get to haproxy failed, uri => %s", url)
-		return nil
-	}
-	bodyText, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		klog.V(3).Infof("Convert to byte failed, uri => %s", url)
-		return nil
-	}
-	return bodyText
-}
-
-func post(url string, payload []byte) (resp []byte, status int) {
-	url = fmt.Sprintf("%s/%s", dataplaneapi, url)
-	client := &http.Client{}
-	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
-	if err != nil {
-		fmt.Println(err)
-	}
-	//req.Header.Add("Authorization", fmt.Sprintf("Basic %s", basicAuth("admin", "1fc917c7ad66487470e466c0ad40ddd45b9f7730a4b43e1b2542627f0596bbdc")))
-	req.Header.Add("Content-Type", "application/json")
-
-	res, err := client.Do(req)
-	defer res.Body.Close()
-	resp, err = ioutil.ReadAll(res.Body)
-	status, _ = strconv.Atoi(res.Status)
-	return
-}
-
-func delete(url string) int {
-	url = fmt.Sprintf("%s/%s", dataplaneapi, url)
-	client := &http.Client{}
-	req, err := http.NewRequest("DELETE", url, nil)
-	//req.Header.Add("Authorization", fmt.Sprintf("Basic %s", basicAuth("admin", "1fc917c7ad66487470e466c0ad40ddd45b9f7730a4b43e1b2542627f0596bbdc")))
-	req.Header.Add("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		klog.V(3).Infof("Delete to haproxy failed, uri => %s", url)
-		return 0
-	}
-	code, _ := strconv.Atoi(resp.Status)
-	return code
 }
 
 // checkWait returns true along with a number of seconds if the server instructed us to wait

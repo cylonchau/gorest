@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/http2"
 	"k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
@@ -25,6 +27,7 @@ const (
 	// persists for some reasonable time (i.e. 120 seconds).  The typical base might be "1".
 	envBackoffBase     = "KUBE_CLIENT_BACKOFF_BASE"
 	envBackoffDuration = "KUBE_CLIENT_BACKOFF_DURATION"
+	defaultMaxRerryNum = 10
 )
 
 var _ RequestInterface = &Request{}
@@ -105,38 +108,63 @@ func NewRequestWithClient(c *RESTClient) *Request {
 		backoff:    backoff,
 		header:     make(map[string]string),
 		body:       nil,
-		maxRetries: 10,
+		maxRetries: defaultMaxRerryNum,
 		timeout:    timeout,
 	}
 }
 
 func FastRequest(baseURL string) *Request {
-	var c *RESTClient
-
-	var backoff rest.BackoffManager
-	if c.createBackoffMgr != nil {
-		backoff = c.createBackoffMgr()
-	}
+	var c = NewDefaultRESTClient()
+	var backoff = c.createBackoffMgr()
 	if backoff == nil {
 		backoff = noBackoff
 	}
-
-	c = NewDefaultRESTClient()
 	return &Request{
 		url:        stringToURL(baseURL),
 		c:          c,
 		backoff:    backoff,
 		header:     make(map[string]string),
 		body:       nil,
-		maxRetries: 10,
+		maxRetries: defaultMaxRerryNum,
+		timeout:    c.Client.Timeout,
+	}
+}
+
+func NewDefaultRequest() *Request {
+	var c = NewDefaultRESTClient()
+	var backoff = c.createBackoffMgr()
+
+	if backoff == nil {
+		backoff = noBackoff
+	}
+
+	return &Request{
+		c:          c,
+		backoff:    backoff,
+		header:     make(map[string]string),
+		body:       nil,
+		maxRetries: defaultMaxRerryNum,
 		timeout:    c.Client.Timeout,
 	}
 }
 
 func (r *Request) URL(baseURL string) *Request {
-	if r.url != nil {
-		r.url = stringToURL(baseURL)
+	r.url = stringToURL(baseURL)
+	return r
+}
+
+func (r *Request) Host(baseHost string) *Request {
+	r.url = stringToURL(baseHost)
+	return r
+}
+
+func (r *Request) Path(basePath string) *Request {
+	if r.url == nil {
+		r.url = new(url.URL)
 	}
+	r.url.RawQuery = ""
+	r.url.Fragment = ""
+	r.url.Path = basePath
 	return r
 }
 
@@ -169,12 +197,11 @@ func (r *Request) setHeader(req *http.Request) {
 	}
 }
 
-func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Response)) (response *Response) {
+func (r *Request) request(ctx context.Context, fn func(*http.Response)) error {
 
 	if r.Err != nil {
 		klog.V(4).Infof("Error in request: %v", r.Err)
-		response.Err = r.Err
-		return
+		return r.Err
 	}
 
 	client := r.c.Client
@@ -193,8 +220,7 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 	for {
 		req, err := http.NewRequest(r.verb, r.url.String(), r.body)
 		if err != nil {
-			response.Err = r.Err
-			return
+			return r.Err
 		}
 		req = req.WithContext(ctx)
 
@@ -206,8 +232,7 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 			// at least once before.
 			// This request should also be throttled with the client-internal rate limiter.
 			if err := r.tryThrottle(ctx); err != nil {
-				response.Err = r.Err
-				return
+				return r.Err
 			}
 		}
 		resp, err := client.Do(req)
@@ -218,8 +243,7 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 			// We are not automatically retrying "write" operations, as
 			// they are not idempotent.
 			if r.verb != "GET" {
-				response.Err = err
-				return
+				return err
 			}
 			// For connection errors and apiserver shutdown errors retry.
 			if net.IsConnectionReset(err) || net.IsProbableEOF(err) {
@@ -231,11 +255,9 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 					Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
 				}
 			} else {
-				response.Err = err
-				return
+				return err
 			}
 		}
-
 		done := func() bool {
 			// Ensure the response body is fully read and closed
 			// before we reconnect, so that we reuse the same TCP
@@ -253,8 +275,9 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 				if seeker, ok := r.body.(io.Seeker); ok && r.body != nil {
 					_, err := seeker.Seek(0, 0)
 					if err != nil {
-						klog.V(4).Infof("Could not retry request, can't Seek() back to beginning of body for %T", r.body)
-						fn(req, resp)
+						logerr := fmt.Sprintf("Could not retry request, can't Seek() back to beginning of body for %T", r.body)
+						klog.V(4).Info(logerr)
+						fn(resp)
 						return true
 					}
 				}
@@ -263,21 +286,25 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 				r.backoff.Sleep(time.Duration(seconds) * time.Second)
 				return false
 			}
-			fn(req, resp)
+			fn(resp)
 			return true
 		}()
+
 		if done {
 			return nil
 		}
 	}
 }
 
-func (r *Request) Do(ctx context.Context) {
-	r.request(ctx, func(request *http.Request, response *http.Response) {
-		resp, _ := ioutil.ReadAll(response.Body)
-		fmt.Println(string(resp))
+func (r *Request) Do(ctx context.Context) Response {
+	var resp Response
+	err := r.request(ctx, func(response *http.Response) {
+		resp = r.transformResponse(response)
 	})
-
+	if err != nil {
+		return Response{Err: err}
+	}
+	return resp
 }
 
 func (r *Request) AddHeader(key, value string) *Request {
@@ -304,6 +331,56 @@ func (r *Request) BearerToken(token string) *Request {
 		r.authenticated = true
 	}
 	return r
+}
+
+func (r *Request) transformResponse(resp *http.Response) Response {
+	var body []byte
+	if resp.Body != nil {
+		data, err := ioutil.ReadAll(resp.Body)
+		switch err.(type) {
+		case nil:
+			body = data
+		case http2.StreamError:
+			// This is trying to catch the scenario that the server may close the connection when sending the
+			// response body. This can be caused by server timeout due to a slow network connection.
+			// TODO: Add test for this. Steps may be:
+			// 1. client-go (or kubectl) sends a GET request.
+			// 2. Apiserver sends back the headers and then part of the body
+			// 3. Apiserver closes connection.
+			// 4. client-go should catch this and return an error.
+			klog.V(2).Infof("Stream error %#v when reading response body, may be caused by closed connection.", err)
+			streamErr := fmt.Errorf("stream error when reading response body, may be caused by closed connection. Please retry. Original error: %v", err)
+			return Response{
+				Err: streamErr,
+			}
+		default:
+			klog.Errorf("Unexpected error when reading response body: %v", err)
+			unexpectedErr := fmt.Errorf("unexpected error when reading response body. Please retry. Original error: %v", err)
+			return Response{
+				Err: unexpectedErr,
+			}
+		}
+	}
+
+	// cannot verify the content type is accurate
+
+	contentType := resp.Header.Get("Content-Type")
+	if len(contentType) > 0 {
+		// if we fail to negotiate a decoder, treat this as an unstructured error
+		switch {
+		case resp.StatusCode == http.StatusSwitchingProtocols:
+			// no-op, we've been upgraded
+		case resp.StatusCode >= http.StatusBadRequest && resp.StatusCode <= http.StatusNotFound:
+			return Response{Err: errors.New("Bad request")}
+		case resp.StatusCode == http.StatusConflict:
+			return Response{Err: errors.New("The specified resource already exists")}
+		}
+		return Response{
+			Body: body,
+			Code: resp.StatusCode,
+		}
+	}
+	return Response{}
 }
 
 func readExpBackoffConfig() rest.BackoffManager {
