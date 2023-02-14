@@ -11,8 +11,6 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
-var dataplaneapi = "http://10.0.0.3:5555"
-
 var (
 	// longThrottleLatency defines threshold for logging requests. All requests being
 	// throttled (via the provided rateLimiter) for more than longThrottleLatency will
