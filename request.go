@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/klog/v2"
 )
 
 const (

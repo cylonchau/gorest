@@ -1,4 +1,4 @@
-module github.com/cylonchau/goset
+module github.com/cylonchau/gorest
 
 go 1.18
 
@@ -8,10 +8,10 @@ replace (
 )
 
 require (
-	github.com/cylonchau/gorest v0.3.0
 	golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd
 	k8s.io/apimachinery v0.19.10
 	k8s.io/client-go v0.19.10
+	k8s.io/klog/v2 v2.80.1
 )
 
 require (
@@ -32,7 +32,6 @@ require (
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	k8s.io/klog/v2 v2.80.1 // indirect
 	k8s.io/utils v0.0.0-20221107191617-1a15be271d1d // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
