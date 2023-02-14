@@ -1,4 +1,4 @@
-module github.com/cylonchau/restclient
+module github.com/cylonchau/gorest
 
 go 1.18
 

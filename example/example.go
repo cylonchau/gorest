@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	rest "github.com/cylonchau/restclient"
+	rest "github.com/cylonchau/gorest"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-package rest
+package gorest
 
 type RequestInterface interface {
 	Get() *Request
