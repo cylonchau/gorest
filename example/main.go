@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.io/cylonchau/kube-haproxy/rest"
+	rest "github.com/cylonchau/restclient"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 	req.Get().Do(context.TODO())
 
 	// with path
-	req := rest.NewDefaultRequest()
+	req = rest.NewDefaultRequest()
 	req = req.Host("http://10.0.0.3:5555").Path("/v2/services/haproxy/configuration/version")
 
 	req.BasicAuth(
