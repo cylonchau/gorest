@@ -218,7 +218,8 @@ func (r *Request) request(ctx context.Context, fn func(*http.Response)) error {
 	// Right now we make about ten retry attempts if we get a Retry-After response.
 	retries := 0
 	for {
-		req, err := http.NewRequest(r.verb, r.url.String(), r.body)
+		urlString, _ := url.QueryUnescape(r.url.String())
+		req, err := http.NewRequest(r.verb, urlString, r.body)
 		if err != nil {
 			return r.Err
 		}
